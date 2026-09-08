@@ -49,16 +49,18 @@ def greedy_actions(q_values, v_p, banned_list):
 
 
 class QNet(GNNRegressor, nn.Module):
-    def __init__(self, hyperparams, s2v_module):
+    def __init__(self, hyperparams, s2v_module, num_node_feats=2,
+                 extra_input_dim=0):
         super().__init__(hyperparams, s2v_module)
 
         embed_dim = hyperparams['latent_dim']
 
-        self.linear_1 = nn.Linear(embed_dim * 2, hyperparams['hidden'])
+        self.linear_1 = nn.Linear(embed_dim * 2 + extra_input_dim,
+                                  hyperparams['hidden'])
         self.linear_out = nn.Linear(hyperparams['hidden'], 1)
         weights_init(self)
 
-        self.num_node_feats = 2
+        self.num_node_feats = num_node_feats
         self.num_edge_feats = 0
 
         if s2v_module is None:
@@ -143,14 +145,67 @@ class QNet(GNNRegressor, nn.Module):
         return actions, raw_pred, prefix_sum
 
 
+class PreferenceQNet(QNet):
+    def __init__(self, hyperparams, s2v_module):
+        super().__init__(hyperparams, s2v_module, num_node_feats=3,
+                         extra_input_dim=1)
+
+    def prepare_node_features(self, batch_graph, picked_nodes, preferences):
+        node_feat, prefix_sum = super().prepare_node_features(batch_graph,
+                                                               picked_nodes)
+        offset = 0
+        for i, end in enumerate(prefix_sum.numpy()):
+            node_feat[offset:end, 2] = float(preferences[i])
+            offset = end
+        return node_feat, prefix_sum
+
+    @staticmethod
+    def preference_features(preferences, prefix_sum=None):
+        features = []
+        if prefix_sum is None:
+            features = [[float(weight)] for weight in preferences]
+        else:
+            prefix_sum = prefix_sum.data.cpu().numpy()
+            offset = 0
+            for i, end in enumerate(prefix_sum):
+                features += [[float(preferences[i])]] * int(end - offset)
+                offset = end
+
+        features = torch.FloatTensor(features)
+        if get_device_placement() == 'GPU':
+            features = features.cuda()
+        return Variable(features)
+
+    def forward(self, states, actions, greedy_acts=False):
+        batch_graph, picked_nodes, banned_list, preferences = zip(*states)
+        node_feat, prefix_sum = self.prepare_node_features(
+            batch_graph, picked_nodes, preferences)
+        embed, graph_embed, prefix_sum = self.run_s2v_embedding(
+            batch_graph, node_feat, prefix_sum)
+
+        prefix_sum = Variable(prefix_sum)
+        if actions is None:
+            graph_embed = self.rep_global_embed(graph_embed, prefix_sum)
+            preference_embed = self.preference_features(preferences, prefix_sum)
+        else:
+            embed = embed[self.add_offset(actions, prefix_sum), :]
+            preference_embed = self.preference_features(preferences)
+
+        embed_s_a = torch.cat((embed, graph_embed, preference_embed), dim=1)
+        raw_pred = self.linear_out(F.relu(self.linear_1(embed_s_a)))
+        if greedy_acts:
+            actions, _ = greedy_actions(raw_pred, prefix_sum, banned_list)
+        return actions, raw_pred, prefix_sum
+
+
 class NStepQNet(nn.Module):
-    def __init__(self, hyperparams, num_steps):
+    def __init__(self, hyperparams, num_steps, net_class=QNet):
         super(NStepQNet, self).__init__()
 
-        list_mod = [QNet(hyperparams, None)]
+        list_mod = [net_class(hyperparams, None)]
 
         for i in range(1, num_steps):
-            list_mod.append(QNet(hyperparams, list_mod[0].s2v))
+            list_mod.append(net_class(hyperparams, list_mod[0].s2v))
 
         self.list_mod = nn.ModuleList(list_mod)
         self.num_steps = num_steps
@@ -159,3 +214,8 @@ class NStepQNet(nn.Module):
         assert time_t >= 0 and time_t < self.num_steps
 
         return self.list_mod[time_t](states, actions, greedy_acts)
+
+
+class PreferenceNStepQNet(NStepQNet):
+    def __init__(self, hyperparams, num_steps):
+        super().__init__(hyperparams, num_steps, net_class=PreferenceQNet)

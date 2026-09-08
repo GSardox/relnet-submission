@@ -141,6 +141,21 @@ def get_graph_hash(g, size=32, include_first=False):
         else:
             hash_instance.update(np.zeros(g.num_nodes))
 
-    hash_instance.update(g.edge_pairs)
+    canonical_edges = np.asarray(
+        g.edge_pairs, dtype=np.int32
+    ).reshape(-1, 2).copy()
+
+    if canonical_edges.size:
+        canonical_edges.sort(axis=1)
+        order = np.lexsort((
+            canonical_edges[:, 1],
+            canonical_edges[:, 0],
+        ))
+        canonical_edges = canonical_edges[order]
+
+    canonical_edges = np.ascontiguousarray(
+        canonical_edges, dtype=np.int32
+    )
+    hash_instance.update(canonical_edges.tobytes(order="C"))
     graph_hash = hash_instance.intdigest()
     return graph_hash

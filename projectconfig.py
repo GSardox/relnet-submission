@@ -13,14 +13,18 @@ class BaseConfig():
     BROKER_HEARTBEAT = 3600.0
 
 class ProjectConfig(BaseConfig):
-    BACKEND_URL = f"mongodb://localhost:27017/{BaseConfig.MONGODB_DATABASE_NAME}"
+    mongo_port = os.environ.get("RN_MONGO_PORT", "27017")
+    rabbit_port = os.environ.get("RN_RABBIT_PORT", "5672")
+    cpu_concurrency = os.environ.get("RN_CPU_CONCURRENCY", "22")
+
+    BACKEND_URL = f"mongodb://localhost:{mongo_port}/{BaseConfig.MONGODB_DATABASE_NAME}"
 
     laborer_pw = os.environ["RN_LABORER_PW"]
-    CELERY_BROKER_URL = f"pyamqp://relnetlaborer:{laborer_pw}@localhost/relnetvhost"
+    CELERY_BROKER_URL = f"pyamqp://relnetlaborer:{laborer_pw}@localhost:{rabbit_port}/relnetvhost"
 
     NUMBER_WORKER_THREADS = {
-        "relnet-worker-cpu": '4',
-        "relnet-worker-gpu": '4',
+        "relnet-worker-cpu": cpu_concurrency,
+        "relnet-worker-gpu": '22',
         "relnet-manager": '2'
     }
     WORKER_MAX_TASKS_PER_CHILD = 1

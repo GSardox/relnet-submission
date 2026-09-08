@@ -206,7 +206,7 @@ def construct_parameter_search_tasks(agent,
     local_tasks = []
     search_space = generate_search_space(parameter_grid)
 
-    additional_opts = {}
+    additional_opts = {"log_tf_summaries": True}
 
     for hyperparams_id, combination in search_space.items():
         hyperparams = {}
@@ -280,9 +280,21 @@ def main():
     parser.set_defaults(train_individually=False)
     parser.set_defaults(edge_percentage=1.)
     parser.set_defaults(parent_dir="/experiment_data")
+    parser.add_argument("--weight",type=float,default=0.5)
+    parser.add_argument("--n", type=int, default=20)
+    parser.add_argument("--agent_budget", type=int, default=None)
+
     args = parser.parse_args()
 
-    experiment_conditions = get_exp_conditions(args.which, args.edge_percentage, args.train_individually)
+    experiment_conditions = get_exp_conditions(args.which, args.edge_percentage, args.train_individually,args.weight)
+    experiment_conditions.set_graph_size(args.n)
+    if args.agent_budget is not None:
+        for objective_name in experiment_conditions.agent_budgets:
+            for agent_name in experiment_conditions.agent_budgets[objective_name]:
+                experiment_conditions.agent_budgets[objective_name][agent_name] = args.agent_budget
+
+    for network_generator in experiment_conditions.network_generators:
+        experiment_conditions.get_normalization_references(network_generator.name)
 
     algorithm_class = "model"
     experiment_conditions.update_relevant_agents(algorithm_class)

@@ -90,7 +90,8 @@ def optimize_hyperparams_task(self,
     obj_fun_kwargs = {"random_seed": experiment_conditions.obj_fun_seed,
                       "num_mc_sims": experiment_conditions.num_mc_sims}
 
-    env = GraphEdgeEnv(objective_function(), obj_fun_kwargs, experiment_conditions.possible_edge_percentage)
+    objective = experiment_conditions.create_objective_function(objective_function, network_generator_instance.name)
+    env = GraphEdgeEnv(objective, obj_fun_kwargs, experiment_conditions.possible_edge_percentage)
     agent_instance = agent(env)
 
     run_options = {}
@@ -167,7 +168,8 @@ def evaluate_for_network_seed_task(self,
         obj_fun_kwargs = {"random_seed": experiment_conditions.obj_fun_seed,
                           "num_mc_sims": experiment_conditions.num_mc_sims}
 
-        env = GraphEdgeEnv(objective_function(), obj_fun_kwargs, experiment_conditions.possible_edge_percentage)
+        objective = experiment_conditions.create_objective_function(objective_function, network_generator_instance.name)
+        env = GraphEdgeEnv(objective, obj_fun_kwargs, experiment_conditions.possible_edge_percentage)
 
         for model_seed in model_seeds:
             setting = (agent.algorithm_name, objective_function.name, network_generator_instance.name)
@@ -229,10 +231,6 @@ def evaluate_for_network_seed_task(self,
     except SoftTimeLimitExceeded:
         logger.warn(f"Task with id {self.request.id} went over the time limit. aborting...")
         return []
-
-
-
-
 
 
 

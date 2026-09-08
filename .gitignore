@@ -18,3 +18,15 @@ relnet/common/_ext/
 tf/
 logs/
 tmp/
+
+# Local credentials and generated dissertation artifacts
+relnet.env
+*.model
+*.pt
+*.pth
+evaluation_raw.csv
+evaluation_manifest.json
+training_histories.csv
+final_evaluations/
+final_figures/
+final_tables/

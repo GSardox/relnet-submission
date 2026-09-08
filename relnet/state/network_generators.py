@@ -1,5 +1,7 @@
 import json
+import heapq
 import math
+import random
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -120,6 +122,9 @@ class GNMNetworkGenerator(OrdinaryGraphGenerator):
         number_vertices = gen_params['n']
         number_edges = gen_params['m']
 
+        if gen_params.get('uniform_tree') and number_edges == number_vertices - 1:
+            return self.generate_tree(number_vertices, random_seed)
+
         if not self.enforce_connected:
             random_graph = nx.generators.random_graphs.gnm_random_graph(number_vertices, number_edges, seed=random_seed)
             return random_graph
@@ -132,6 +137,28 @@ class GNMNetworkGenerator(OrdinaryGraphGenerator):
                 else:
                     continue
             raise ValueError("Maximum number of tries exceeded, giving up...")
+
+    @staticmethod
+    def generate_tree(n, random_seed):
+        local_random = random.Random(random_seed)
+        sequence = [local_random.randrange(n) for _ in range(n - 2)]
+        degrees = [1] * n
+        for node in sequence:
+            degrees[node] += 1
+
+        leaves = [node for node, degree in enumerate(degrees) if degree == 1]
+        heapq.heapify(leaves)
+        graph = nx.Graph()
+        graph.add_nodes_from(range(n))
+        for node in sequence:
+            leaf = heapq.heappop(leaves)
+            graph.add_edge(leaf, node)
+            degrees[leaf] -= 1
+            degrees[node] -= 1
+            if degrees[node] == 1:
+                heapq.heappush(leaves, node)
+        graph.add_edge(heapq.heappop(leaves), heapq.heappop(leaves))
+        return graph
 
 class BANetworkGenerator(OrdinaryGraphGenerator):
     name = 'barabasi_albert'
@@ -188,7 +215,6 @@ class EuroroadNetworkGenerator(RealWorldNetworkGenerator):
 
 class ScigridNetworkGenerator(RealWorldNetworkGenerator):
     name = ScigridDataPreprocessor.DS_NAME
-
 
 
 def check_is_real_world(generator_class):

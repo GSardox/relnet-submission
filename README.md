@@ -147,6 +147,122 @@ Open the notebook selecting the `Python (RelNET)` kernel and run all cells. Resu
 ### Problems with jupyter kernel
 In case the kernel is not found, try reinstalling the kernel by running `docker exec -it -u 0 relnet-manager /bin/bash -c "source activate ucfadar-relnet; python -m ipykernel install --user --name relnet --display-name "Python (RelNET)"`
 
+## Dissertation extensions
+
+This branch is based on commit `46b6439` of the original
+`VictorDarvariu/graph-construction-rl` repository. It adds only the training,
+evaluation and analysis code used by the accompanying dissertation. Generated
+models, evaluations, logs and figures are external data and are not committed.
+
+The main additions are:
+
+- normalized linear scalarisation of global efficiency and targeted
+  robustness;
+- five-seed specialist and preference-conditioned RNet--DQN training;
+- exact small-graph comparisons;
+- unified evaluation, PDF plotting and table generation;
+- Myriad CPU, GPU and broker-free single-job launchers.
+
+The retained code is organized as follows:
+
+- `run_preference_training.py`: standard and starting-density conditioned
+  training;
+- `myriad/celery/`: CPU and GPU Celery jobs with one shared implementation;
+- `myriad/preference/`: preference-training and calibration jobs;
+- `myriad/single/`: one-model jobs that do not use Celery;
+- `relnet/evaluation/model_evaluation.py`: evaluates models and baselines
+  through RelNet's original `Agent.eval` loop;
+- `relnet/evaluation/experiment_profiles.py`: experiment and checkpoint paths;
+- `plot_all_results.py`: creates the fourteen synthetic figures used by the
+  dissertation;
+- `make_results_tables.py`: creates the endpoint and hypervolume tables;
+- `tools/calibrate_normalization.py`: computes the objective calibration used
+  by the density experiments.
+
+The preference-conditioned agent remains a RelNet DQN. `PreferenceQNet` is a
+small subclass of the original `QNet`: it adds the scalar preference as a
+third node feature and as one input to the Q-value MLP. The original specialist
+network and its defaults are unchanged, and existing conditioned checkpoint
+parameter names are preserved.
+
+### Evaluate stored checkpoints
+
+```bash
+python -B -u evaluate_models.py \
+  --profile final \
+  --validate-only
+
+python -B -u evaluate_models.py \
+  --profile final
+```
+
+The other built-in profiles are `real_world_fixed` and `real_world_density`.
+
+Evaluation still uses the original graph generators, baseline agents,
+`Agent.eval` loop and checkpoint naming. Results are written to CSV instead of
+MongoDB because each run records both objectives and the selected preference.
+
+### Generate final PDF figures
+
+```bash
+python -B -u plot_all_results.py final-status \
+  --evaluation-root /experiment_data/final_evaluations
+
+python -B -u plot_all_results.py final-pdfs \
+  --evaluation-root /experiment_data/final_evaluations \
+  --figure-root /experiment_data/final_figures \
+  --project-root /experiment_data/single_graph_corrected \
+  --agent-seed 168
+```
+
+The script creates the synthetic front, dense preference, graph-level, size
+transfer and exact outcome figures used by the dissertation. Exact figures use
+the selected DQN training seed and each held-out exact graph seed.
+
+```bash
+python -B -u plot_real_world_comparisons.py \
+  --min-n 20 \
+  --max-n 22
+```
+
+This creates the conditioned, specialist and Greedy comparison for each
+selected real network.
+
+### Generate synthetic result tables
+
+```bash
+python -B -u make_results_tables.py \
+  --evaluation_dir /experiment_data/final_evaluations/standard \
+  --paper_output_dir /experiment_data/final_tables \
+  --confidence 0.95 \
+  --decimals 4
+```
+
+The same script creates the real-network efficiency-gain and robustness-gain
+tables for the L=5 evaluation:
+
+```bash
+python -B -u make_results_tables.py \
+  --real_world \
+  --evaluation_dir /experiment_data/final_evaluations_fixed_real_world/real_world \
+  --paper_output_dir /experiment_data/final_tables \
+  --checkpoint_generator random_network \
+  --confidence 0.95 \
+  --decimals 4
+```
+
+Checkpoints and generated evaluations are deliberately not committed.  Their
+locations are defined in `experiment_profiles.py`.
+
+### Myriad jobs
+
+The `myriad/` directory contains only the final launchers used for the reported
+runs. `celery/relnet_cpu.sh` and `celery/relnet_gpu.sh` supply their scheduler
+resources and call the shared `celery/run_celery_job.sh`. Preference and
+broker-free single-model jobs are separate because they use different job
+dependencies and output manifests. Copy `relnet_example.env` to the untracked
+`relnet.env` before use.
+
 ## Contact
 
 If you face any issues or have any queries feel free to contact `v.darvariu@ucl.ac.uk` and I will be happy to assist.

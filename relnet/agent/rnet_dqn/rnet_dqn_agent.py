@@ -59,7 +59,7 @@ class RNetDQNAgent(PyTorchAgent):
                     nonterms.append(i)
 
             if len(cleaned_sp):
-                _, _, banned = zip(*cleaned_sp)
+                banned = [state[2] for state in cleaned_sp]
                 _, q_t_plus_1, prefix_sum_prime = self.old_net((cur_time + 1) % 2, cleaned_sp, None)
                 _, q_rhs = greedy_actions(q_t_plus_1, prefix_sum_prime, banned)
                 list_target[nonterms] = q_rhs
@@ -138,9 +138,10 @@ class RNetDQNAgent(PyTorchAgent):
         return self.pick_random_actions(i)
 
     def run_simulation(self):
+        self.before_simulation()
         selected_idx = self.advance_pos_and_sample_indices()
         self.environment.setup([self.train_g_list[idx] for idx in selected_idx],
-                           [self.train_initial_obj_values[idx] for idx in selected_idx],
+                           self.training_initial_values(selected_idx),
                            training=True)
         self.post_env_setup()
 
@@ -152,7 +153,8 @@ class RNetDQNAgent(PyTorchAgent):
             list_at = self.make_actions(t, greedy=False)
 
             non_exhausted_before, = np.where(~self.environment.exhausted_budgets)
-            list_st = self.environment.clone_state(non_exhausted_before)
+            list_st = self.prepare_replay_states(
+                self.environment.clone_state(non_exhausted_before))
             self.environment.step(list_at)
 
             non_exhausted_after, = np.where(~self.environment.exhausted_budgets)
@@ -162,7 +164,8 @@ class RNetDQNAgent(PyTorchAgent):
             nonterm_st = [list_st[i] for i in nonterm_indices]
             nonterm_at = [list_at[i] for i in non_exhausted_after]
             rewards = np.zeros(len(nonterm_at), dtype=np.float)
-            nonterm_s_prime = self.environment.clone_state(non_exhausted_after)
+            nonterm_s_prime = self.prepare_replay_states(
+                self.environment.clone_state(non_exhausted_after))
 
             now_term_indices = np.flatnonzero(np.isin(non_exhausted_before, exhausted_after))
             term_st = [list_st[i] for i in now_term_indices]
@@ -182,6 +185,15 @@ class RNetDQNAgent(PyTorchAgent):
         final_s_prime = None
         self.mem_pool.add_list(final_st, final_at, rewards, final_s_prime, [True] * len(final_at), (t - 1) % 2)
 
+    def before_simulation(self):
+        pass
+
+    def prepare_replay_states(self, states):
+        return states
+
+    def training_initial_values(self, selected_idx):
+        return [self.train_initial_obj_values[idx] for idx in selected_idx]
+
     def post_env_setup(self):
         pass
 
@@ -195,4 +207,3 @@ class RNetDQNAgent(PyTorchAgent):
                        'max_lv': 5,
                        'eps_step_denominator': 10}
         return hyperparams
-

@@ -1,4 +1,5 @@
 import os
+import csv
 from copy import deepcopy
 from datetime import timedelta
 from itertools import product
@@ -13,13 +14,16 @@ from relnet.state.network_generators import NetworkGenerator, GNMNetworkGenerato
     EuroroadNetworkGenerator, ScigridNetworkGenerator
 
 
+NORMALIZATION_FILE = os.path.join(os.path.dirname(__file__), "normalization_references_exact.csv")
+
 class ExperimentConditions(object):
-    def __init__(self, possible_edge_percentage, train_individually):
+    def __init__(self, possible_edge_percentage, train_individually, objective_weight=0.5):
         self.gen_params = {}
         self.base_n = 20
         self.possible_edge_percentage = possible_edge_percentage
         self.train_individually = train_individually
-
+        self.objective_weight = objective_weight
+        
         self.gen_params['n'] = self.base_n
         self.gen_params['m_percentage_er'] = 20
         self.gen_params['m_ba'] = 2
@@ -48,16 +52,72 @@ class ExperimentConditions(object):
                 FiedlerVectorAgent,
                 EffectiveResistanceAgent
             ],
+            LinearCombinedObjective.name: [
+                RandomAgent,
+                GreedyAgent,
+                LowestDegreeProductAgent,
+                FiedlerVectorAgent,
+                EffectiveResistanceAgent
+            ],
+            GlobalEfficiency.name: [
+                RandomAgent,
+                GreedyAgent,
+                LowestDegreeProductAgent,
+                FiedlerVectorAgent,
+                EffectiveResistanceAgent
+            ],
         }
 
         self.objective_functions = [
-            CriticalFractionRandom,
-            CriticalFractionTargeted,
+            LinearCombinedObjective,
         ]
 
 
     def get_model_seed(self, run_number):
         return run_number * 42
+
+    def set_graph_size(self, n):
+        self.base_n = n
+        self.gen_params['n'] = n
+        self.gen_params['m'] = NetworkGenerator.compute_number_edges(self.gen_params['n'], self.gen_params['m_percentage_er'])
+        self.num_mc_sims = self.gen_params['n'] * self.num_mc_sims_multiplier
+
+    def get_normalization_references(self, network_generator_name):
+        if not os.path.exists(NORMALIZATION_FILE):
+            raise ValueError("normalization references have not been calibrated")
+
+        n = self.gen_params['n']
+        edge_budget = NetworkGenerator.compute_number_edges(n, self.possible_edge_percentage)
+
+        with open(NORMALIZATION_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+
+            for row in reader:
+                if row['network_generator'] == network_generator_name and int(row['n']) == n and int(row['edge_budget']) == edge_budget:
+                    efficiency_reference_gain = float(row['efficiency_reference_gain'])
+                    robustness_reference_gain = float(row['robustness_reference_gain'])
+                    efficiency_initial = float(row['efficiency_initial'])
+                    robustness_initial = float(row['robustness_initial'])
+
+                    if efficiency_reference_gain <= 0. or robustness_reference_gain <= 0.:
+                        raise ValueError("normalization reference gains must be greater than zero")
+
+                    return efficiency_reference_gain, robustness_reference_gain, efficiency_initial, robustness_initial
+
+        raise ValueError("no normalization references for generator " + network_generator_name + ", n=" + str(n) + ", L=" + str(edge_budget))
+
+    def create_objective_function(self, objective_function, network_generator_name=None):
+        if objective_function is LinearCombinedObjective:
+            efficiency_reference_gain, robustness_reference_gain, efficiency_initial, robustness_initial = self.get_normalization_references(network_generator_name)
+
+            return objective_function(weight=self.objective_weight,
+                                      efficiency_reference_gain=efficiency_reference_gain,
+                                      robustness_reference_gain=robustness_reference_gain,
+                                      efficiency_initial=efficiency_initial,
+                                      robustness_initial=robustness_initial)
+
+        return objective_function()
+
 
     def update_size_dependant_params(self, multiplier):
         self.gen_params['n'] = int(self.base_n * multiplier)
@@ -110,8 +170,8 @@ class ExperimentConditions(object):
 
 
 class SyntheticGraphsExperimentConditions(ExperimentConditions):
-    def __init__(self, possible_edge_percentage, train_individually):
-        super().__init__(possible_edge_percentage, train_individually)
+    def __init__(self, possible_edge_percentage, train_individually, objective_weight=0.5):
+        super().__init__(possible_edge_percentage, train_individually,objective_weight)
 
         self.network_generators = [
             GNMNetworkGenerator,
@@ -120,7 +180,6 @@ class SyntheticGraphsExperimentConditions(ExperimentConditions):
 
         self.agents_models = [
             RNetDQNAgent,
-            SLAgent,
         ]
 
         self.agent_budgets = {
@@ -132,15 +191,23 @@ class SyntheticGraphsExperimentConditions(ExperimentConditions):
                 RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
                 SLAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
             },
+            LinearCombinedObjective.name: {
+                RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+                SLAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+            },
+            GlobalEfficiency.name: {
+                RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+                SLAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+            },
         }
 
-        self.size_multipliers = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]
+        self.size_multipliers = [1]
 
 
         self.experiment_params = {'train_graphs': 10000,
                                   'validation_graphs': 100,
                                   'test_graphs': 100,
-                                  'num_runs': 50}
+                                  'num_runs': 1}
 
         self.experiment_params['model_seeds'] = [self.get_model_seed(run_num) for run_num in
                                                  range(self.experiment_params['num_runs'])]
@@ -184,8 +251,8 @@ class SyntheticGraphsExperimentConditions(ExperimentConditions):
 
 
 class RealWorldGraphsExperimentConditions(ExperimentConditions):
-    def __init__(self, possible_edge_percentage, train_individually):
-        super().__init__(possible_edge_percentage, train_individually)
+    def __init__(self, possible_edge_percentage, train_individually,objective_weight=0.5):
+        super().__init__(possible_edge_percentage, train_individually,objective_weight)
 
         self.network_generators = [
             EuroroadNetworkGenerator,
@@ -201,6 +268,12 @@ class RealWorldGraphsExperimentConditions(ExperimentConditions):
                 RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
             },
             CriticalFractionTargeted.name: {
+                RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+            },
+            LinearCombinedObjective.name: {
+                RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
+            },
+            GlobalEfficiency.name: {
                 RNetDQNAgent.algorithm_name: int(4 * possible_edge_percentage * (10 ** 4)),
             },
         }
@@ -244,10 +317,9 @@ class RealWorldGraphsExperimentConditions(ExperimentConditions):
         return hyperparam_grids
 
 
-def get_exp_conditions(which, possible_edge_percentage, train_individually):
+def get_exp_conditions(which, possible_edge_percentage, train_individually, objective_weight=0.5):
     if which == 'synth':
-        cond = SyntheticGraphsExperimentConditions(possible_edge_percentage, train_individually)
+        cond = SyntheticGraphsExperimentConditions(possible_edge_percentage, train_individually, objective_weight)
     else:
-        cond = RealWorldGraphsExperimentConditions(possible_edge_percentage, train_individually)
+        cond = RealWorldGraphsExperimentConditions(possible_edge_percentage, train_individually, objective_weight)
     return cond
-
